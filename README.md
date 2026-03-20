@@ -30,6 +30,12 @@
     <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
+    <!-- PapaParse لقراءة ملفات الإكسل بكفاءة -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    
+    <!-- SheetJS لقراءة ملفات الاكسل -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
@@ -66,44 +72,48 @@
             const [data, setData] = useState([]);
             const [query, setQuery] = useState('');
             const [selectedRoad, setSelectedRoad] = useState(null);
+            const [notification, setNotification] = useState(null);
 
-            // معالجة بيانات CSV
-            const parseCSV = (csvText) => {
-                const lines = csvText.split('\n');
-                const parsedData = [];
-                
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i].trim();
-                    if (!line) continue;
-                    
-                    // تقسيم النص وتجاهل الفواصل داخل علامات التنصيص
-                    const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-                    
-                    if (cols.length > 10 && cols[3]) {
-                        parsedData.push({
-                            id: Math.random().toString(36).substr(2, 9),
-                            contractNumber: cols[2]?.trim(),
-                            roadNumber: cols[3]?.trim(),
-                            roadName: cols[4]?.trim()?.replace(/['"]/g, ''),
-                            roadType: cols[5]?.trim(),
-                            length: cols[6]?.trim(),
-                            currentServiceLevel: cols[7]?.trim(),
-                            startKm: cols[9]?.trim(),
-                            endKm: cols[10]?.trim(),
-                            startLong: cols[11]?.trim(),
-                            startLat: cols[12]?.trim(),
-                            endLong: cols[13]?.trim(),
-                            endLat: cols[14]?.trim(),
-                            startLink: cols[15]?.trim()?.replace(/['"]/g, ''),
-                            endLink: cols[16]?.trim()?.replace(/['"]/g, '')
+            const showNotification = (msg, type) => {
+                setNotification({ msg, type });
+                setTimeout(() => setNotification(null), 4000);
+            };
+
+            // معالجة بيانات CSV باستخدام مكتبة متقدمة
+            const parseData = (input) => {
+                Papa.parse(input, {
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        const parsedData = [];
+                        results.data.forEach(cols => {
+                            // التأكد من أن السطر يحتوي على بيانات طريق صالحة وتجاهل العناوين
+                            if (cols[3] && String(cols[3]).trim() !== '' && String(cols[3]).trim() !== 'رقم الطريق' && !String(cols[3]).includes('الطريق')) {
+                                parsedData.push({
+                                    id: Math.random().toString(36).substr(2, 9),
+                                    contractNumber: cols[2]?.trim(), // العمود C
+                                    roadNumber: cols[3]?.trim(), // العمود D
+                                    roadName: cols[4]?.trim()?.replace(/['"]/g, ''), // العمود E
+                                    roadType: cols[5]?.trim(), // العمود F
+                                    length: cols[6]?.trim(), // العمود G
+                                    currentServiceLevel: cols[7]?.trim(), // العمود H
+                                    startKm: cols[9]?.trim(), // العمود J
+                                    endKm: cols[10]?.trim(), // العمود K
+                                    startLong: cols[11]?.trim(), // العمود L
+                                    startLat: cols[12]?.trim(), // العمود M
+                                    endLong: cols[13]?.trim(), // العمود N
+                                    endLat: cols[14]?.trim(), // العمود O
+                                    startLink: cols[15]?.trim()?.replace(/['"]/g, ''), // العمود P
+                                    endLink: cols[16]?.trim()?.replace(/['"]/g, '') // العمود Q
+                                });
+                            }
                         });
+                        setData(parsedData);
                     }
-                }
-                setData(parsedData);
+                });
             };
 
             useEffect(() => {
-                parseCSV(initialData);
+                parseData(initialData);
                 lucide.createIcons();
             }, []);
 
@@ -111,24 +121,69 @@
                 lucide.createIcons();
             });
 
-            // معالجة رفع الملف
+            // معالجة رفع الملفات (دعم كامل لـ Excel و CSV)
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (evt) => parseCSV(evt.target.result);
-                    reader.readAsText(file);
-                }
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    const data = new Uint8Array(evt.target.result);
+                    const wb = XLSX.read(data, {type: 'array'});
+                    const wsname = wb.SheetNames[0];
+                    const ws = wb.Sheets[wsname];
+                    
+                    // قراءة كل الصفوف مع وضع قيمة فارغة للخلايا الفاضية لمنع الأخطاء
+                    const dataArray = XLSX.utils.sheet_to_json(ws, {header:1, defval: ''});
+                    
+                    const parsedData = [];
+                    dataArray.forEach(cols => {
+                        if (!cols || cols.length < 5) return;
+                        
+                        const roadName = String(cols[4]).trim();
+                        const roadNum = String(cols[3]).trim();
+                        
+                        // الاعتماد على اسم الطريق لتخطي الفراغات والعناوين
+                        if (roadName !== '' && !roadName.includes('اسم الطريق') && roadNum !== '') {
+                            parsedData.push({
+                                id: Math.random().toString(36).substr(2, 9),
+                                contractNumber: String(cols[2]).trim(), // C
+                                roadNumber: roadNum, // D
+                                roadName: roadName.replace(/['"]/g, ''), // E
+                                roadType: String(cols[5]).trim(), // F
+                                length: String(cols[6]).trim(), // G
+                                currentServiceLevel: String(cols[7]).trim(), // H
+                                startKm: String(cols[9]).trim(), // J
+                                endKm: String(cols[10]).trim(), // K
+                                startLong: String(cols[11]).trim(), // L
+                                startLat: String(cols[12]).trim(), // M
+                                endLong: String(cols[13]).trim(), // N
+                                endLat: String(cols[14]).trim(), // O
+                                startLink: String(cols[15]).trim().replace(/['"]/g, ''), // P
+                                endLink: String(cols[16]).trim().replace(/['"]/g, '') // Q
+                            });
+                        }
+                    });
+                    
+                    if (parsedData.length > 0) {
+                        setData(parsedData);
+                        showNotification(`تمت إضافة ${parsedData.length} طريق بنجاح ✅`, 'success');
+                    } else {
+                        showNotification('لم يتم العثور على طرق، تأكد من الملف ❌', 'error');
+                    }
+                };
+                reader.readAsArrayBuffer(file);
             };
 
             // البحث الذكي
             const filteredRoads = useMemo(() => {
                 if (!query) return [];
-                const lowerQuery = query.toLowerCase();
-                return data.filter(road => 
-                    road.roadNumber?.toLowerCase().startsWith(lowerQuery) ||
-                    road.roadName?.toLowerCase().includes(lowerQuery)
-                ).slice(0, 15); // عرض أفضل 15 نتيجة لتسريع الأداء
+                const cleanQuery = query.trim().toLowerCase();
+                return data.filter(road => {
+                    const numMatch = String(road.roadNumber || '').toLowerCase().includes(cleanQuery);
+                    const nameMatch = String(road.roadName || '').toLowerCase().includes(cleanQuery);
+                    return numMatch || nameMatch;
+                }).slice(0, 15);
             }, [query, data]);
 
             return (
@@ -143,8 +198,8 @@
                     <div className="absolute top-6 left-6">
                         <label className="cursor-pointer flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-full backdrop-blur-sm transition text-sm font-semibold border border-white/20">
                             <i data-lucide="upload-cloud" className="w-4 h-4"></i>
-                            تحديث البيانات (CSV)
-                            <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+                            تحديث البيانات (Excel)
+                            <input type="file" accept=".csv, .xlsx, .xls" className="hidden" onChange={handleFileUpload} />
                         </label>
                     </div>
 
@@ -155,6 +210,13 @@
                         </h1>
                         <p className="text-white/80 font-medium">نظام الاستعلام الذكي والمبسط لبيانات الطرق</p>
                     </div>
+
+                    {/* الإشعارات */}
+                    {notification && (
+                        <div className={`fixed top-5 left-1/2 transform -translate-x-1/2 z-50 px-6 py-3 rounded-full shadow-lg text-white font-bold transition-all animate-fade-in-up ${notification.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}>
+                            {notification.msg}
+                        </div>
+                    )}
 
                     {!selectedRoad ? (
                         <div className="w-full max-w-2xl relative z-10">
